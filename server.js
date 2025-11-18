@@ -4,7 +4,8 @@ const express = require('express');
 const helmet = require('helmet');
 const mysql = require('mysql2/promise');
 const { RateLimiterMemory } = require('rate-limiter-flexible');
-
+import pkg from 'pg';
+const { Pool } = pkg;
 const app = express();
 // CORS FIX
 app.use((req, res, next) => {
@@ -67,14 +68,21 @@ app.use(async (req, res, next) => {
 app.use(express.static(path.join(__dirname, "public")));
 
 // DB Pool
-const pool = mysql.createPool({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASS,
-  database: process.env.DB_NAME,
-  waitForConnections: true,
-  connectionLimit: 10
+const pool = new Pool({
+  host: process.env.PG_HOST,
+  port: process.env.PG_PORT,
+  database: process.env.PG_DATABASE,
+  user: process.env.PG_USER,
+  password: process.env.PG_PASSWORD,
+  ssl: {
+    rejectUnauthorized: false
+  }
 });
+
+// Test connection
+pool.connect()
+  .then(() => console.log("PostgreSQL connected"))
+  .catch(err => console.error("PostgreSQL connection error:", err));
 
 // Health check
 app.get("/api/health", (req, res) => {
@@ -83,39 +91,30 @@ app.get("/api/health", (req, res) => {
 
 // Certificate Validator API
 app.post("/api/validate", async (req, res) => {
-  const { certificate_id, date_of_issue } = req.body;
-
-  if (!certificate_id || !date_of_issue) {
-    return res.status(400).json({ error: "Missing required fields" });
-  }
-
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date_of_issue)) {
-    return res.status(400).json({ error: "Invalid date format (YYYY-MM-DD)" });
-  }
-
   try {
-    const sql = `
-      SELECT company_name, 
-             DATE_FORMAT(date_of_issue, '%Y-%m-%d') AS date_of_issue,
-             surveillance_1,
-             surveillance_2
+    const { certificate_id, date_of_issue } = req.body;
+
+    const query = `
+      SELECT company_name, date_of_issue, surveillance_1, surveillance_2
       FROM certificates
-      WHERE certificate_id = ? AND date_of_issue = ?
+      WHERE certificate_id = $1 AND date_of_issue = $2
       LIMIT 1
     `;
 
-    const [rows] = await pool.execute(sql, [certificate_id, date_of_issue]);
+    const result = await pool.query(query, [certificate_id, date_of_issue]);
 
-    if (!rows.length) {
+    if (result.rows.length === 0) {
       return res.status(404).json({ error: "Certificate not found" });
     }
 
-    res.json(rows[0]);
+    return res.json(result.rows[0]);
+
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Server error" });
+    console.error("Validate error:", err);
+    return res.status(500).json({ error: "Server error" });
   }
 });
+
 
 // Fallback to Home Page
 app.use((req, res) => {
