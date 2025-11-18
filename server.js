@@ -6,6 +6,18 @@ const mysql = require('mysql2/promise');
 const { RateLimiterMemory } = require('rate-limiter-flexible');
 
 const app = express();
+// CORS FIX
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "https://qmspl.org"); 
+  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200); // allow preflight
+  }
+  next();
+});
+
 const PORT = process.env.PORT || 3000;
 
 // Security Headers
